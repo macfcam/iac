@@ -5,7 +5,7 @@
   become_method: sudo
   vars:
     netskope_url: "https://download-lojasrenner.eu.goskope.com/dlr/linux/get"
-    install_dir: "/tmp"
+    install_dir: "/tmp/netskope"
     netskope_installer: "{{ install_dir }}/NSClient.run"
     dante_config: |
       logoutput: /var/log/socks.log
