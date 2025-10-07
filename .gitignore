@@ -1,0 +1,5 @@
+id_ed25519
+*.terraform*
+**/.terraform*/*
+*.terraform.lock.hcl
+**/.terraform.lock.hcl/*

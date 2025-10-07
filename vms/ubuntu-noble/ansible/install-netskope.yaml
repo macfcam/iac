@@ -1,0 +1,81 @@
+---
+- name: Install Netskope client on Ubuntu
+  hosts: ubuntu-noble
+  become: yes
+  become_method: sudo
+  vars:
+    netskope_url: "https://download-lojasrenner.eu.goskope.com/dlr/linux/get"
+    install_dir: "/tmp"
+    netskope_installer: "{{ install_dir }}/NSClient.run"
+    dante_config: |
+      logoutput: /var/log/socks.log
+      internal: ens3 port = 1080
+      external: ens3
+      clientmethod: none
+      socksmethod: none
+      user.privileged: root
+      user.notprivileged: nobody
+
+      client pass {
+              from: 0.0.0.0/0 to: 0.0.0.0/0
+              log: error connect disconnect
+      }
+      client block {
+              from: 0.0.0.0/0 to: 0.0.0.0/0
+              log: connect error
+      }
+      socks pass {
+              from: 0.0.0.0/0 to: 0.0.0.0/0
+              log: error connect disconnect
+      }
+      socks block {
+              from: 0.0.0.0/0 to: 0.0.0.0/0
+              log: connect error
+      }
+
+  tasks:
+    - name: Ensure temporary directory exists
+      ansible.builtin.file:
+        path: "{{ install_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download Netskope installer
+      ansible.builtin.get_url:
+        url: "{{ netskope_url }}"
+        dest: "{{ netskope_installer }}"
+        mode: "0644"
+        validate_certs: yes
+
+    - name: Make Netskope installer executable
+      ansible.builtin.file:
+        path: "{{ netskope_installer }}"
+        mode: "0755"
+
+    - name: Run Netskope installer if not already installed
+      ansible.builtin.shell: |
+        "{{ netskope_installer }}" || true
+      become: yes
+      become_user: root
+
+    - name: Install Dante Server
+      ansible.builtin.apt:
+        name: dante-server
+        state: present
+        update_cache: yes
+
+    - name: Configure Dante
+      ansible.builtin.copy:
+        dest: /etc/danted.conf
+        content: "{{ dante_config }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart Dante
+
+  handlers:
+    - name: Restart Dante
+      ansible.builtin.systemd:
+        name: danted
+        enabled: yes
+        state: restarted

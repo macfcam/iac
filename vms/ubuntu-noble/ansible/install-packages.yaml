@@ -1,0 +1,53 @@
+---
+- name: Install GNOME minimal desktop and dependencies
+  hosts: ubuntu-noble
+  become: yes
+  become_method: sudo
+
+  tasks:
+    - name: Ensure apt cache is updated
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install base packages
+      apt:
+        name:
+          - git
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+
+    - name: Install GNOME minimal desktop and QEMU guest agent
+      apt:
+        name:
+          - ubuntu-desktop-minimal
+          - qemu-guest-agent
+        state: present
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+    - name: Ensure systemd default target is graphical
+      file:
+        src: /lib/systemd/system/graphical.target
+        dest: /etc/systemd/system/default.target
+        state: link
+      notify: Reboot system
+
+    - name: Enable/start GDM and QEMU guest agent
+      systemd:
+        name: "{{ item }}"
+        enabled: yes
+        state: started
+      loop:
+        - gdm3
+        - qemu-guest-agent
+
+  handlers:
+    - name: Reboot system
+      reboot:
+        msg: "Rebooting after setting graphical target"
+        reboot_timeout: 600
