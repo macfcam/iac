@@ -1,5 +1,5 @@
 ---
-- name: Install Netskope client on Ubuntu
+- name: Install Netskope client and configure Dante proxy
   hosts: ubuntu-noble
   become: yes
   become_method: sudo
@@ -73,7 +73,39 @@
         mode: "0644"
       notify: Restart Dante
 
+    - name: Create systemd override directory for danted
+      ansible.builtin.file:
+        path: /etc/systemd/system/danted.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Configure systemd override for danted.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/danted.service.d/override.conf
+        content: |
+          [Unit]
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Restart=on-failure
+          RestartSec=5s
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart Dante
+
+    - name: Ensure NetworkManager-wait-online is enabled (for VM networking)
+      ansible.builtin.systemd:
+        name: NetworkManager-wait-online.service
+        enabled: yes
+
   handlers:
+    - name: Reload systemd
+      ansible.builtin.command: systemctl daemon-reload
+
     - name: Restart Dante
       ansible.builtin.systemd:
         name: danted
