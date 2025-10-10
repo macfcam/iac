@@ -67,7 +67,7 @@ EOF
 # Define the VM domain
 resource "libvirt_domain" "ubuntu" {
   name            = var.vm_name
-  memory          = 4096
+  memory          = 8192
   vcpu            = 2
   cpu {
     mode          = "host-passthrough"
