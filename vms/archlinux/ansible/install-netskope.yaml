@@ -1,0 +1,125 @@
+---
+- name: Install Netskope client and configure Dante SOCKS proxy (Arch Linux)
+  hosts: archlinux
+  become: yes
+  become_method: sudo
+  vars:
+    netskope_url: "https://download-lojasrenner.eu.goskope.com/dlr/linux/get"
+    install_dir: "/tmp/netskope"
+    netskope_installer: "{{ install_dir }}/NSClient.run"
+
+    # Final config file used by Arch's sockd.service
+    dante_config: |
+      logoutput: /var/log/socks.log
+      internal: 0.0.0.0 port = 1080
+      external: eth0
+      clientmethod: none
+      socksmethod: none
+      user.privileged: root
+      user.unprivileged: nobody
+
+      client pass {
+              from: 0.0.0.0/0 to: 0.0.0.0/0
+              log: error connect disconnect
+      }
+      client block {
+              from: 0.0.0.0/0 to: 0.0.0.0/0
+              log: connect error
+      }
+      socks pass {
+              from: 0.0.0.0/0 to: 0.0.0.0/0
+              log: error connect disconnect
+      }
+      socks block {
+              from: 0.0.0.0/0 to: 0.0.0.0/0
+              log: connect error
+      }
+
+  tasks:
+    - name: Ensure temporary directory exists
+      ansible.builtin.file:
+        path: "{{ install_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download Netskope installer
+      ansible.builtin.get_url:
+        url: "{{ netskope_url }}"
+        dest: "{{ netskope_installer }}"
+        mode: "0644"
+        validate_certs: yes
+
+    - name: Make Netskope installer executable
+      ansible.builtin.file:
+        path: "{{ netskope_installer }}"
+        mode: "0755"
+
+    - name: Run Netskope installer if not already installed
+      ansible.builtin.shell: |
+        "{{ netskope_installer }}" || true
+      become: yes
+      become_user: root
+
+    - name: Install dependencies required by Netskope
+      community.general.pacman:
+        name:
+          - webkit2gtk
+          - libappindicator-gtk3
+        state: present
+        update_cache: yes
+        extra_args: "--noconfirm --needed"
+
+    - name: Install Dante SOCKS server
+      community.general.pacman:
+        name: dante
+        state: present
+        update_cache: yes
+        extra_args: "--noconfirm --needed"
+
+    - name: Configure Dante (sockd)
+      ansible.builtin.copy:
+        dest: /etc/sockd.conf
+        content: "{{ dante_config }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart sockd
+
+    - name: Create systemd override directory for sockd
+      ansible.builtin.file:
+        path: /etc/systemd/system/sockd.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Configure systemd override for sockd.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/sockd.service.d/override.conf
+        content: |
+          [Unit]
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Restart=on-failure
+          RestartSec=5s
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart sockd
+
+    - name: Ensure NetworkManager-wait-online is enabled (for VM networking)
+      ansible.builtin.systemd:
+        name: NetworkManager-wait-online.service
+        enabled: yes
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.command: systemctl daemon-reload
+
+    - name: Restart sockd
+      ansible.builtin.systemd:
+        name: sockd
+        enabled: yes
+        state: restarted

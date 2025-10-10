@@ -1,0 +1,41 @@
+---
+- name: Install KDE Plasma desktop and dependencies
+  hosts: archlinux
+  become: yes
+  become_method: sudo
+
+  tasks:
+    - name: Update package database and system
+      pacman:
+        update_cache: yes
+        upgrade: yes
+
+    - name: Install KDE Plasma desktop and QEMU guest agent
+      pacman:
+        name:
+          - plasma
+          - qemu-guest-agent
+        state: present
+        extra_args: "--needed --noconfirm"
+
+    - name: Ensure systemd default target is graphical
+      file:
+        src: /usr/lib/systemd/system/graphical.target
+        dest: /etc/systemd/system/default.target
+        state: link
+      notify: Reboot system
+
+    - name: Enable/start SDDM and QEMU guest agent
+      systemd:
+        name: "{{ item }}"
+        enabled: yes
+        state: started
+      loop:
+        - sddm
+        - qemu-guest-agent
+
+  handlers:
+    - name: Reboot system
+      reboot:
+        msg: "Rebooting after setting graphical target"
+        reboot_timeout: 600
