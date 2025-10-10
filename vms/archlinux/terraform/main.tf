@@ -87,7 +87,7 @@ resource "libvirt_domain" "archlinux" {
 
   network_interface {
     network_name  = "default"
-    addresses     = [ "192.168.122.101" ]
+    addresses     = [ "192.168.122.100" ]
   }
 
   console {
