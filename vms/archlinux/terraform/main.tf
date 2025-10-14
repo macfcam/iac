@@ -67,9 +67,9 @@ EOF
 # Define the VM domain
 resource "libvirt_domain" "archlinux" {
   
-  # Add Spice channels and set SATA for disks
+  # XML injection before creating VM
   xml {
-    xslt = file("add_spicevmc_and_set_sata_disk.xsl")
+    xslt = file("xml_injection.xsl")
   }
 
   name            = var.vm_name
