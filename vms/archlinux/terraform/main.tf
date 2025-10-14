@@ -66,12 +66,15 @@ EOF
 
 # Define the VM domain
 resource "libvirt_domain" "archlinux" {
+  
+  # Add Spice channels and set SATA for disks
+  xml {
+    xslt = file("add_spicevmc_and_set_sata_disk.xsl")
+  }
+
   name            = var.vm_name
   memory          = 8192
   machine         = "q35"
-  xml {
-    xslt = file("cdrom-model.xsl")
-  }
   vcpu            = 2
   cpu {
     mode          = "host-passthrough"

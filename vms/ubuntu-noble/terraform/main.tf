@@ -66,8 +66,15 @@ EOF
 
 # Define the VM domain
 resource "libvirt_domain" "ubuntu" {
+  
+  # Add Spice channels and set SATA for disks
+  xml {
+    xslt = file("add_spicevmc_and_set_sata_disk.xsl")
+  }
+
   name            = var.vm_name
   memory          = 8192
+  machine         = "q35"
   vcpu            = 2
   cpu {
     mode          = "host-passthrough"
@@ -77,12 +84,13 @@ resource "libvirt_domain" "ubuntu" {
   cloudinit       = libvirt_cloudinit_disk.commoninit.id
 
   disk {
+    scsi          = true
     volume_id     = libvirt_volume.ubuntu_disk.id
   }
 
   network_interface {
     network_name  = "default"
-    addresses     = [ "192.168.122.100" ]
+    addresses     = [ "192.168.122.101" ]
   }
 
   console {
