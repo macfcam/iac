@@ -1,0 +1,42 @@
+- name: Ensure Ansible is installed
+  hosts: ubuntu-noble
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Check if Ansible binary exists
+      stat:
+        path: /usr/bin/ansible
+      register: ansible_binary
+
+    - name: Install dependencies
+      apt:
+        name: software-properties-common
+        state: present
+        update_cache: yes
+      when: not ansible_binary.stat.exists
+
+    - name: Add Ansible PPA repository
+      apt_repository:
+        repo: ppa:ansible/ansible
+        state: present
+        update_cache: yes
+      when: not ansible_binary.stat.exists
+
+    - name: Install Ansible
+      apt:
+        name: ansible
+        state: present
+      when: not ansible_binary.stat.exists
+
+    - name: Get Ansible version
+      command: "ansible --version"
+      register: version_result
+      changed_when: false
+#       when: ansible_binary.stat.exists
+
+    - name: Show installed version
+      debug:
+        msg: "{{ version_result.stdout_lines }}"
+      when: version_result is defined
+      # when: ansible_binary.stat.exists and version_result is defined
