@@ -25,6 +25,15 @@ resource "libvirt_volume" "ubuntu_disk" {
   size            = 42949672960
 }
 
+# Create additional storage volume
+resource "libvirt_volume" "managed-disk1" {
+  name            = "${var.vm_name}-managed-disk1.qcow2"
+  #  base_volume_id  = libvirt_volume.ubuntu_base.id
+  pool            = "default"
+  format          = "qcow2"
+  size            = 42949672960
+}
+
 # Base image volume
 resource "libvirt_volume" "ubuntu_base" {
   name            = var.vm_name
@@ -80,7 +89,7 @@ resource "libvirt_domain" "ubuntu" {
     mode          = "host-passthrough"
   }
 
-  running         = false
+  running         = true
   cloudinit       = libvirt_cloudinit_disk.commoninit.id
 
   disk {
@@ -88,9 +97,15 @@ resource "libvirt_domain" "ubuntu" {
     volume_id     = libvirt_volume.ubuntu_disk.id
   }
 
+  disk {
+    scsi          = true
+    volume_id     = libvirt_volume.managed-disk1.id
+  }
+
   network_interface {
-    network_name  = "default"
-    addresses     = [ "192.168.122.101" ]
+    network_name    = "default"
+    addresses       = [ "192.168.122.101" ]
+    mac             = "52:54:00:0A:77:5B"
   }
 
   console {
