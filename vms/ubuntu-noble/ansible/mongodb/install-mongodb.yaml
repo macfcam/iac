@@ -1,0 +1,196 @@
+---
+- name: Install MongoDB 4.4.29 manually from .deb packages
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    keyfile_src: ./files/keyfile
+    mongodb_dir: /etc/mongodb
+    mongodb_version: "4.4.29"
+    mongodb_database_tools_version: "100.10.0"
+    mongodb_repo_url: "https://repo.mongodb.org/apt/ubuntu/dists/bionic/mongodb-org/4.4/multiverse/binary-amd64"
+    libssl_pkg: "libssl1.1_1.1.1f-1ubuntu2_amd64.deb"
+    libssl_url: "http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb"
+    mongodb_packages:
+      - mongodb-org-shell
+      - mongodb-org-server
+      - mongodb-org-mongos
+      - mongodb-org-tools
+      - mongodb-org-database-tools-extra
+      - mongodb-org
+
+  tasks:
+    - name: Warn if OS release is not officially supported
+      ansible.builtin.debug:
+        msg: "⚠️  MongoDB 4.4 is not officially supported on Ubuntu {{ ansible_distribution_version }}. Proceeding anyway..."
+      when: ansible_distribution_version not in ["18.04", "20.04"]
+
+    - name: Ensure wget is installed
+      ansible.builtin.apt:
+        name: wget
+        state: present
+        update_cache: yes
+
+    - name: Create temporary download directory
+      ansible.builtin.file:
+        path: /tmp/mongodb-install
+        state: directory
+        mode: "0755"
+
+    - name: Download MongoDB database tools package
+      ansible.builtin.get_url:
+        url: "{{ mongodb_repo_url }}/mongodb-database-tools_{{ mongodb_database_tools_version }}_amd64.deb"
+        dest: "/tmp/mongodb-install/mongodb-database-tools_{{ mongodb_database_tools_version }}_amd64.deb"
+        mode: "0644"
+
+    - name: Download MongoDB packages
+      ansible.builtin.get_url:
+        url: "{{ mongodb_repo_url }}/{{ item }}_{{ mongodb_version }}_amd64.deb"
+        dest: "/tmp/mongodb-install/{{ item }}_{{ mongodb_version }}_amd64.deb"
+        mode: "0644"
+      loop: "{{ mongodb_packages }}"
+
+    - name: Download libssl1.1 dependency
+      ansible.builtin.get_url:
+        url: "{{ libssl_url }}"
+        dest: "/tmp/mongodb-install/{{ libssl_pkg }}"
+        mode: "0644"
+
+    - name: Install libssl1.1 dependency
+      ansible.builtin.apt:
+        deb: "/tmp/mongodb-install/{{ libssl_pkg }}"
+
+    - name: Install MongoDB Database Tools first
+      ansible.builtin.apt:
+        deb: "/tmp/mongodb-install/mongodb-database-tools_{{ mongodb_database_tools_version }}_amd64.deb"
+
+    - name: Install all MongoDB packages together
+      ansible.builtin.shell: |
+        cd /tmp/mongodb-install
+        apt install -y ./mongodb-org*.deb
+
+    - name: Ensure /etc/mongodb directory exists
+      ansible.builtin.file:
+        path: "{{ mongodb_dir }}"
+        state: directory
+        owner: mongodb
+        group: mongodb
+        mode: "0755"
+
+    - name: Check if keyfile exists
+      ansible.builtin.stat:
+        path: "{{ mongodb_dir }}/keyfile"
+      register: keyfile_exists
+
+    - name: Create MongoDB keyfile if it doesn't exist
+      ansible.builtin.copy:
+        src: "{{ keyfile_src }}"
+        dest: "{{ mongodb_dir }}/keyfile"
+        owner: mongodb
+        group: mongodb
+        mode: "0600"
+      when: not keyfile_exists.stat.exists
+
+    - name: Configure MongoDB main settings
+      ansible.builtin.copy:
+        dest: /etc/mongod.conf
+        content: |
+          # for documentation of all options, see:
+          #   http://docs.mongodb.org/manual/reference/configuration-options/
+
+          # Where and how to store data.
+          storage:
+            dbPath: /data
+            journal:
+              enabled: true
+          #    fork: true
+          #  wiredTiger:
+          #    engineConfig:
+          #      cacheSizeGB: 5
+          # where to write logging data.
+
+          systemLog:
+            destination: file
+            logAppend: true
+            path: /var/log/mongodb/mongod.log
+
+          # network interfaces
+          net:
+            port: 27017
+            bindIp: ubuntu-2404,127.0.0.1
+
+          # how the process runs
+          processManagement:
+            timeZoneInfo: /usr/share/zoneinfo
+
+          security:
+            authorization: enabled
+            keyFile: /etc/mongodb/keyfile
+
+          #operationProfiling:
+
+          replication:
+            replSetName: ReplDEV
+
+          #sharding:
+
+          ## Enterprise-Only Options:
+
+          #auditLog:
+
+          #snmp:
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart MongoDB
+
+    - name: Verify MongoDB installation
+      ansible.builtin.command: mongod --version
+      register: mongod_version
+      changed_when: false
+      failed_when: mongod_version.rc != 0
+
+    - name: Display installed MongoDB version
+      ansible.builtin.debug:
+        msg: "✅ {{ mongod_version.stdout_lines[0] }} installed successfully."
+
+    - name: Ensure MongoDB service is enabled and started
+      ansible.builtin.systemd:
+        name: mongod
+        enabled: yes
+        state: started
+
+    - name: Wait for MongoDB service to be active and verify it's running
+      ansible.builtin.systemd:
+        name: mongod
+      register: mongod_service_status
+      failed_when: >
+        mongod_service_status.status.ActiveState != 'active' or
+        mongod_service_status.status.SubState != 'running'
+      retries: 3
+      delay: 5
+      until: >
+        mongod_service_status.status.ActiveState == 'active' and
+        mongod_service_status.status.SubState == 'running'
+
+    - name: Display MongoDB service status
+      ansible.builtin.debug:
+        msg: "✅ MongoDB service is {{ mongod_service_status.status.ActiveState }} and {{ mongod_service_status.status.SubState }}"
+
+    - name: Hold MongoDB packages to prevent automatic updates
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop: "{{ mongodb_packages + ['mongodb-database-tools'] }}"
+
+    - name: Cleanup temporary .deb files
+      ansible.builtin.file:
+        path: /tmp/mongodb-install
+        state: absent
+
+  handlers:
+    - name: Restart MongoDB
+      ansible.builtin.systemd:
+        name: mongod
+        state: restarted

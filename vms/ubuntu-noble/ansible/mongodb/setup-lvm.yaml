@@ -1,0 +1,93 @@
+---
+- name: Prepare LVM for MongoDB
+  hosts: ubuntu-noble
+  become: yes
+  vars:
+    data_device: /dev/sdb # change to your block device
+    vg_name: vg_data
+    lv_name: lv_data
+    lv_path: "/dev/{{ vg_name }}/{{ lv_name }}"
+    lv_size: "100%VG" # or "20G"
+    fstype: xfs
+    mongodb_user: mongodb
+    mongodb_group: mongodb
+    mount_point: /data
+
+  pre_tasks:
+    - name: Ensure community.general collection is available (warning only)
+      ansible.builtin.debug:
+        msg: "Make sure community.general collection is installed for lvg/lvol modules."
+      when: false # informational; don't run in normal flow
+
+  tasks:
+    - name: Wait for device to exist
+      ansible.builtin.wait_for:
+        path: "{{ data_device }}"
+        timeout: 20
+
+    - name: Create physical volume (if not already)
+      ansible.builtin.command: pvdisplay {{ data_device }}
+      register: pvdisplay
+      ignore_errors: yes
+
+    - name: pvcreate if not a PV already
+      ansible.builtin.command: pvcreate {{ data_device }}
+      when: pvdisplay.rc != 0
+
+    - name: Create volume group
+      community.general.lvg:
+        vg: "{{ vg_name }}"
+        pvs: "{{ data_device }}"
+        state: present
+
+    - name: Create logical volume
+      community.general.lvol:
+        vg: "{{ vg_name }}"
+        lv: "{{ lv_name }}"
+        size: "{{ lv_size }}"
+        state: present
+
+    - name: Create filesystem on LV (only if not formatted)
+      ansible.builtin.command: "blkid -s TYPE -o value {{ lv_path }}"
+      register: blkid_before
+      failed_when: false
+    - name: Format LV if no filesystem
+      ansible.builtin.command: "mkfs.{{ fstype }} {{ lv_path }}"
+      when: blkid_before.stdout == ""
+      changed_when: "'already' not in blkid_before.stderr"
+
+    - name: Ensure mount point exists
+      ansible.builtin.file:
+        path: "{{ mount_point }}"
+        state: directory
+        owner: root
+        group: root
+        mode: 0755
+
+    - name: Add LV to fstab (use UUID)
+      ansible.builtin.command: "blkid -s UUID -o value {{ lv_path }}"
+      register: uuid_out
+    - name: Ensure fstab entry present
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '^UUID={{ uuid_out.stdout }}\s+{{ mount_point }}'
+        line: "UUID={{ uuid_out.stdout }}  {{ mount_point }}  {{ fstype }}  defaults  0 2"
+        state: present
+      when: uuid_out.stdout != ""
+
+    - name: Mount the LV
+      ansible.builtin.mount:
+        path: "{{ mount_point }}"
+        src: "{{ lv_path }}"
+        fstype: "{{ fstype }}"
+        opts: defaults
+        state: mounted
+
+    - name: Ensure ownership of mongodb data directory
+      ansible.builtin.file:
+        path: "{{ mount_point }}"
+        state: directory
+        owner: "{{ mongodb_user }}"
+        group: "{{ mongodb_group }}"
+        recurse: yes
+        mode: "0755"
