@@ -1,0 +1,107 @@
+---
+- name: Reconfigure MongoDB Replica Set with new hostname
+  hosts: mongodb
+  become: yes
+  gather_facts: yes
+
+  vars_files:
+    - vault.yml
+
+  vars:
+    mongodb_port: 27017
+    mongodb_admin_user: admin # Change if different
+    mongodb_admin_password: "{{ mongodb_admin_password }}" # Use vault in production
+    mongodb_admin_db: admin
+    replica_set_name: ReplDEV
+    # Optional: set old_hostname if you want to verify/replace specific host
+    # old_hostname: "mongodb-05-dev-oms"
+
+  tasks:
+    - name: Check if MongoDB is running
+      ansible.builtin.systemd:
+        name: mongod
+      register: mongod_status
+      failed_when: mongod_status.status.ActiveState != 'active'
+
+    - name: Get current replica set configuration
+      ansible.builtin.command: >
+        mongosh --host 127.0.0.1 --port {{ mongodb_port }}
+        -u {{ mongodb_admin_user }}
+        -p {{ mongodb_admin_password }}
+        --authenticationDatabase {{ mongodb_admin_db }}
+        --quiet --eval "JSON.stringify(rs.conf())"
+      register: rs_config_output
+      changed_when: false
+      no_log: true # Hide password from logs
+
+    - name: Parse current replica set config
+      ansible.builtin.set_fact:
+        current_rs_config: "{{ rs_config_output.stdout | from_json }}"
+
+    - name: Display current replica set members
+      ansible.builtin.debug:
+        msg: "Current members: {{ current_rs_config.members | map(attribute='host') | list }}"
+
+    - name: Check if reconfiguration is needed
+      ansible.builtin.set_fact:
+        needs_reconfig: >-
+          {{
+            current_rs_config.members |
+            selectattr('host', 'search', ansible_hostname) |
+            list | length == 0
+          }}
+
+    - name: Display reconfiguration status
+      ansible.builtin.debug:
+        msg: >-
+          {% if needs_reconfig %}
+          ⚠️  Hostname mismatch detected. Current: {{ current_rs_config.members[0].host }},
+          Expected: {{ ansible_hostname }}:{{ mongodb_port }}. Reconfiguration needed.
+          {% else %}
+          ✅ Replica set configuration is correct, no changes needed.
+          {% endif %}
+
+    - name: Reconfigure replica set with new hostname
+      ansible.builtin.command: >
+        mongosh --host 127.0.0.1 --port {{ mongodb_port }}
+        -u {{ mongodb_admin_user }}
+        -p {{ mongodb_admin_password }}
+        --authenticationDatabase {{ mongodb_admin_db }}
+        --quiet --eval "
+        cfg = rs.conf();
+        cfg.members[0].host = '{{ ansible_hostname }}:{{ mongodb_port }}';
+        rs.reconfig(cfg, {force: true});
+        "
+      register: reconfig_result
+      when: needs_reconfig
+      no_log: true # Hide password from logs
+
+    - name: Wait for replica set to stabilize
+      ansible.builtin.pause:
+        seconds: 10
+      when: needs_reconfig
+
+    - name: Verify replica set status after reconfiguration
+      ansible.builtin.command: >
+        mongosh --host 127.0.0.1 --port {{ mongodb_port }}
+        -u {{ mongodb_admin_user }}
+        -p {{ mongodb_admin_password }}
+        --authenticationDatabase {{ mongodb_admin_db }}
+        --quiet --eval "JSON.stringify(rs.status())"
+      register: rs_status_output
+      changed_when: false
+      no_log: true
+      when: needs_reconfig
+
+    - name: Parse replica set status
+      ansible.builtin.set_fact:
+        rs_status: "{{ rs_status_output.stdout | from_json }}"
+      when: needs_reconfig
+
+    - name: Display replica set status
+      ansible.builtin.debug:
+        msg: >-
+          ✅ Replica set reconfigured successfully.
+          New member: {{ rs_status.members[0].name }}
+          State: {{ rs_status.members[0].stateStr }}
+      when: needs_reconfig

@@ -1,6 +1,6 @@
 ---
 - name: Install MongoDB 4.4.29 manually from .deb packages
-  hosts: all
+  hosts: mongodb
   become: yes
   gather_facts: yes
 
@@ -118,7 +118,7 @@
           # network interfaces
           net:
             port: 27017
-            bindIp: ubuntu-2404,127.0.0.1
+            bindIp: {{ ansible_hostname }},127.0.0.1
 
           # how the process runs
           processManagement:
