@@ -10,11 +10,9 @@
   vars:
     mongodb_port: 27017
     mongodb_admin_user: admin # Change if different
-    mongodb_admin_password: "{{ mongodb_admin_password }}" # Use vault in production
+    mongodb_admin_password: "{{ vault_mongodb_admin_password }}" # Use vault in production
     mongodb_admin_db: admin
-    replica_set_name: ReplDEV
-    # Optional: set old_hostname if you want to verify/replace specific host
-    # old_hostname: "mongodb-05-dev-oms"
+    replica_set_name: rs0
 
   tasks:
     - name: Check if MongoDB is running
@@ -25,9 +23,7 @@
 
     - name: Get current replica set configuration
       ansible.builtin.command: >
-        mongosh --host 127.0.0.1 --port {{ mongodb_port }}
-        -u {{ mongodb_admin_user }}
-        -p {{ mongodb_admin_password }}
+        mongo -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
         --authenticationDatabase {{ mongodb_admin_db }}
         --quiet --eval "JSON.stringify(rs.conf())"
       register: rs_config_output
@@ -63,9 +59,7 @@
 
     - name: Reconfigure replica set with new hostname
       ansible.builtin.command: >
-        mongosh --host 127.0.0.1 --port {{ mongodb_port }}
-        -u {{ mongodb_admin_user }}
-        -p {{ mongodb_admin_password }}
+        mongo -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
         --authenticationDatabase {{ mongodb_admin_db }}
         --quiet --eval "
         cfg = rs.conf();
@@ -83,9 +77,7 @@
 
     - name: Verify replica set status after reconfiguration
       ansible.builtin.command: >
-        mongosh --host 127.0.0.1 --port {{ mongodb_port }}
-        -u {{ mongodb_admin_user }}
-        -p {{ mongodb_admin_password }}
+        mongo -u {{ mongodb_admin_user }} -p {{ mongodb_admin_password }}
         --authenticationDatabase {{ mongodb_admin_db }}
         --quiet --eval "JSON.stringify(rs.status())"
       register: rs_status_output
